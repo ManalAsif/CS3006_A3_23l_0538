@@ -7,12 +7,11 @@
 #include <vector>
 #include <atomic>
 #include <mutex>
+#include <condition_variable>
 
-/*
- * ================================================================
- * Serial Task System
- * ================================================================
- */
+// ============================================================
+// Serial Task System
+// ============================================================
 
 class TaskSystemSerial : public ITaskSystem {
 public:
@@ -20,6 +19,7 @@ public:
     ~TaskSystemSerial();
 
     const char* name();
+
     void run(IRunnable* runnable, int num_total_tasks);
 
     TaskID runAsyncWithDeps(
@@ -31,12 +31,9 @@ public:
     void sync();
 };
 
-
-/*
- * ================================================================
- * Parallel Task System - Always Spawn
- * ================================================================
- */
+// ============================================================
+// Parallel Task System - Always Spawn
+// ============================================================
 
 class TaskSystemParallelSpawn : public ITaskSystem {
 private:
@@ -47,6 +44,7 @@ public:
     ~TaskSystemParallelSpawn();
 
     const char* name();
+
     void run(IRunnable* runnable, int num_total_tasks);
 
     TaskID runAsyncWithDeps(
@@ -58,41 +56,27 @@ public:
     void sync();
 };
 
-
-/*
- * ================================================================
- * Parallel Task System - Thread Pool Spinning
- * ================================================================
- */
+// ============================================================
+// Parallel Task System - Thread Pool Spinning
+// ============================================================
 
 class TaskSystemParallelThreadPoolSpinning : public ITaskSystem {
 private:
     int num_threads_;
 
-    // Persistent worker threads
     std::vector<std::thread> workers_;
 
-    // Atomic task counters
     std::atomic<int> next_task_;
     std::atomic<int> completed_tasks_;
-
-    // Tracks workers that have finished the current batch
     std::atomic<int> finished_workers_;
-
-    // Identifies each new batch of tasks
     std::atomic<int> generation_;
-
-    // Signals worker threads to terminate
     std::atomic<bool> shutdown_;
 
-    // Current batch information
     IRunnable* current_runnable_;
     int total_tasks_;
 
-    // Prevents concurrent calls to run()
     std::mutex run_mutex_;
 
-    // Worker thread function
     void workerLoop();
 
 public:
@@ -100,6 +84,7 @@ public:
     ~TaskSystemParallelThreadPoolSpinning();
 
     const char* name();
+
     void run(IRunnable* runnable, int num_total_tasks);
 
     TaskID runAsyncWithDeps(
@@ -111,19 +96,47 @@ public:
     void sync();
 };
 
-
-/*
- * ================================================================
- * Parallel Task System - Thread Pool Sleeping
- * ================================================================
- */
+// ============================================================
+// Parallel Task System - Thread Pool Sleeping
+// ============================================================
 
 class TaskSystemParallelThreadPoolSleeping : public ITaskSystem {
+private:
+    int num_threads_;
+
+    std::vector<std::thread> workers_;
+
+    // Protects batch publication and worker wake-up
+    std::mutex mutex_;
+    std::condition_variable work_cv_;
+
+    // Used by run() to wait for the batch to finish
+    std::condition_variable done_cv_;
+
+    // Prevents overlapping run() calls
+    std::mutex run_mutex_;
+
+    // Task distribution and completion
+    std::atomic<int> next_task_;
+    std::atomic<int> completed_tasks_;
+
+    // Counts workers that have exited the current batch
+    int finished_workers_;
+
+    IRunnable* current_runnable_;
+    int total_tasks_;
+
+    int generation_;
+    bool shutdown_;
+
+    void workerLoop();
+
 public:
     TaskSystemParallelThreadPoolSleeping(int num_threads);
     ~TaskSystemParallelThreadPoolSleeping();
 
     const char* name();
+
     void run(IRunnable* runnable, int num_total_tasks);
 
     TaskID runAsyncWithDeps(
